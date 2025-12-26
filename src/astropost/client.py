@@ -17,6 +17,7 @@ from tenacity import (
     wait_exponential,
     retry_if_exception_type,
 )
+import markdown
 
 from astropost.models import Email
 from email.message import EmailMessage
@@ -97,9 +98,8 @@ class GmailClient:
                 console.print(
                     "[red]Permission denied. You may need to delete your token.json to re-authorize with new scopes.[/red]"
                 )
-                raise  # Re-raise to trigger retry or let caller handle
+                raise
             else:
-                # console.print(f"[red]Error listing emails: {e}[/red]")
                 raise
             return []
 
@@ -168,12 +168,10 @@ class GmailClient:
                 else:
                     text_part = decoded
 
-        # Prefer text part, fall back to cleaned HTML
         if text_part:
             return text_part.strip()
         elif html_part:
             soup: Any = BeautifulSoup(html_part, "html.parser")
-            # Remove scripts and styles
             for script in soup(["script", "style"]):
                 script.decompose()
             cleaned_text = soup.get_text(separator="\n").strip()
@@ -181,6 +179,27 @@ class GmailClient:
             return ret  # type: ignore[no-any-return, unused-ignore]
 
         return ""
+
+    def _sanitize_body(self, text: str) -> str:
+        """
+        Cleans LLM-generated text by stripping Markdown code fences
+        (e.g., ```markdown ... ```) and excess whitespace.
+        """
+        cleaned = text.strip()
+        # Remove ``` or ```markdown from the start
+        if cleaned.startswith("```"):
+            # Split by newline, remove first line if it starts with ```
+            lines = cleaned.splitlines()
+            if lines[0].strip().startswith("```"):
+                lines = lines[1:]
+
+            # Remove last line if it matches ```
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+
+            cleaned = "\n".join(lines).strip()
+
+        return cleaned
 
     def send_email(
         self,
@@ -225,11 +244,27 @@ class GmailClient:
                         subject = original_subject
                 quoted_info = f"\n\n---------- Forwarded message ---------\nFrom: {original.sender}\nDate: {original.date}\nSubject: {original.subject}\n\n{original.body}"
 
-        full_body = body + (quoted_info if quoted_info else "")
-        message.set_content(full_body)
+        # Sanitize and Render
+        clean_body = self._sanitize_body(body)
+        full_text_body = clean_body + (quoted_info if quoted_info else "")
 
-        html_content = self._create_html_content(full_body)
-        message.add_alternative(html_content, subtype="html")
+        # 1. Plain Text Part (Cleaned but not HTML rendered)
+        message.set_content(full_text_body)
+
+        # 2. HTML Part (Rendered Markdown)
+        # We render only the new body content, preserving the quoted info as simple text block if needed,
+        # or we could render the whole thing. Rendering the whole thing is safer for consistency.
+        html_rendered = markdown.markdown(clean_body)
+
+        if quoted_info:
+            # Wrap quoted info in a blockquote or similar for HTML
+            quoted_html = f"<br><br><blockquote style='border-left: 2px solid #ccc; padding-left: 10px; color: #555;'>{quoted_info.replace(chr(10), '<br>')}</blockquote>"
+            full_html = html_rendered + quoted_html
+        else:
+            full_html = html_rendered
+
+        html_wrapper = self._create_html_wrapper(full_html)
+        message.add_alternative(html_wrapper, subtype="html")
 
         message["To"] = ", ".join(recipients)
         message["From"] = from_address if from_address else "me"
@@ -277,11 +312,13 @@ class GmailClient:
         )
         return str(send_message["id"])
 
-    def _create_html_content(self, text_content: str) -> str:
+    def _create_html_wrapper(self, html_content: str) -> str:
         return f"""
         <html>
-          <body style="font-family: Arial, sans-serif;">
-            <div style="white-space: pre-wrap;">{text_content}</div>
+          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto;">
+              {html_content}
+            </div>
           </body>
         </html>
         """
