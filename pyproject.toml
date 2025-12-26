@@ -1,6 +1,6 @@
 [project]
 name = "astropost"
-version = "0.1.4"
+version = "0.1.5"
 description = "A comprehensive email tool combining reporting, sending, and retrieval using modern Python practices."
 readme = "README.md"
 requires-python = ">=3.12"
