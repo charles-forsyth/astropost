@@ -1,7 +1,8 @@
 import argparse
 from pathlib import Path
+import sys
 
-from typing import Dict, Any, List
+from typing import List
 
 from rich.console import Console
 from rich.table import Table
@@ -9,6 +10,7 @@ from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
 
 from astropost.client import GmailClient
+from astropost.models import Email
 
 console = Console()
 
@@ -45,10 +47,10 @@ def cmd_list(args: argparse.Namespace) -> None:
 
     for email in emails:
         table.add_row(
-            str(email["id"]),
-            str(email["date"])[:25],  # Truncate date for display
-            str(email["from"])[:40],
-            str(email["subject"])[:60],
+            str(email.id),
+            str(email.date)[:25],
+            str(email.sender)[:40],
+            str(email.subject)[:60],
         )
 
     console.print(table)
@@ -65,19 +67,19 @@ def cmd_show(args: argparse.Namespace) -> None:
 
     console.print(
         Panel(
-            f"[bold]From:[/bold] {email['from']}\n"
-            f"[bold]Date:[/bold] {email['date']}\n"
-            f"[bold]Subject:[/bold] {email['subject']}\n\n"
-            f"{email['body']}",
-            title=f"Email ID: {email['id']}",
+            f"[bold]From:[/bold] {email.sender}\n"
+            f"[bold]Date:[/bold] {email.date}\n"
+            f"[bold]Subject:[/bold] {email.subject}\n\n"
+            f"{email.body}",
+            title=f"Email ID: {email.id}",
             expand=False,
         )
     )
 
 
-def handle_reply(client: GmailClient, email_details: Dict[str, Any]) -> None:
+def handle_reply(client: GmailClient, email_details: Email) -> None:
     """Interactive reply flow."""
-    console.print(f"\n[bold]Replying to:[/bold] {email_details['subject']}")
+    console.print(f"\n[bold]Replying to:[/bold] {email_details.subject}")
     body = Prompt.ask("Enter your reply (or 'cancel' to abort)")
 
     if body.lower() == "cancel":
@@ -85,14 +87,14 @@ def handle_reply(client: GmailClient, email_details: Dict[str, Any]) -> None:
 
     try:
         # Assuming sender is the one to reply to
-        recipient = email_details["from"]
+        recipient = email_details.sender
 
         with console.status("[bold green]Sending reply..."):
             client.send_email(
                 recipients=[recipient],
                 subject="",  # Auto-handled by reply logic
                 body=body,
-                reply_to_id=email_details["id"],
+                reply_to_id=email_details.id,
                 from_address=DEFAULT_FROM,
             )
         console.print("[bold green]Reply sent![/bold green]")
@@ -124,9 +126,9 @@ def cmd_scan(args: argparse.Namespace) -> None:
         for idx, email in enumerate(emails, 1):
             table.add_row(
                 str(idx),
-                str(email["from"])[:30],
-                str(email["subject"])[:50],
-                str(email["date"])[:16],
+                str(email.sender)[:30],
+                str(email.subject)[:50],
+                str(email.date)[:16],
             )
 
         console.print(table)
@@ -166,9 +168,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
         valid_indices = [i for i in indices if 1 <= i <= len(emails)]
 
         if not valid_indices:
-            if (
-                action != "unknown" and action != "read"
-            ):  # Read usually handles one, loop handles multi
+            if action != "unknown" and action != "read":
                 console.print("[red]No valid email numbers provided.[/red]")
                 import time
 
@@ -184,7 +184,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
         if action == "read" and len(valid_indices) == 1:
             target_idx = valid_indices[0]
             selected_email = emails[target_idx - 1]
-            msg_id = selected_email["id"]
+            msg_id = selected_email.id
 
             console.clear()
             with console.status(f"[bold green]Loading email {target_idx}..."):
@@ -193,10 +193,10 @@ def cmd_scan(args: argparse.Namespace) -> None:
             if full_email:
                 console.print(
                     Panel(
-                        f"[bold]From:[/bold] {full_email['from']}\n"
-                        f"[bold]Date:[/bold] {full_email['date']}\n"
-                        f"[bold]Subject:[/bold] {full_email['subject']}\n\n"
-                        f"{full_email['body']}",
+                        f"[bold]From:[/bold] {full_email.sender}\n"
+                        f"[bold]Date:[/bold] {full_email.date}\n"
+                        f"[bold]Subject:[/bold] {full_email.subject}\n\n"
+                        f"{full_email.body}",
                         title=f"Email #{target_idx}",
                         expand=False,
                     )
@@ -214,7 +214,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
                         handle_reply(client, full_email)
                         break
                     elif sub_choice == "d":
-                        if Confirm.ask(f"Delete email '{full_email['subject']}'?"):
+                        if Confirm.ask(f"Delete email '{full_email.subject}'?"):
                             if client.trash_email(msg_id):
                                 console.print("[green]Deleted.[/green]")
                                 import time
@@ -239,7 +239,6 @@ def cmd_scan(args: argparse.Namespace) -> None:
 
         # Multi-Action Loop
         if action in ["d", "a", "u"]:
-            # Confirmation for multiple deletes
             if action == "d" and not Confirm.ask(
                 f"Delete {len(valid_indices)} emails?"
             ):
@@ -247,7 +246,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
 
             for target_idx in valid_indices:
                 selected_email = emails[target_idx - 1]
-                msg_id = selected_email["id"]
+                msg_id = selected_email.id
 
                 if action == "d":
                     client.trash_email(msg_id)
@@ -264,11 +263,10 @@ def cmd_scan(args: argparse.Namespace) -> None:
             time.sleep(1.5)
 
         elif action == "r":
-            # Reply only supports one at a time for now in this flow
             if valid_indices:
                 target_idx = valid_indices[0]
                 selected_email = emails[target_idx - 1]
-                msg_id = selected_email["id"]
+                msg_id = selected_email.id
 
                 with console.status(
                     f"[bold green]Loading email {target_idx} for reply..."
@@ -367,16 +365,19 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if hasattr(args, "func"):
-        try:
+    try:
+        if hasattr(args, "func"):
             args.func(args)
-        except Exception as e:
-            console.print(f"[bold red]Error:[/bold red] {e}")
-            import traceback
+        else:
+            parser.print_help()
+    except KeyboardInterrupt:
+        console.print("\n[bold yellow]Operation cancelled by user.[/bold yellow]")
+        sys.exit(0)
+    except Exception as e:
+        console.print(f"[bold red]Error:[/bold red] {e}")
+        import traceback
 
-            traceback.print_exc()
-    else:
-        parser.print_help()
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
