@@ -1,0 +1,39 @@
+[project]
+name = "astropost"
+version = "0.1.0"
+description = "A comprehensive email tool combining reporting, sending, and retrieval using modern Python practices."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "google-api-python-client>=2.0.0",
+    "google-auth-httplib2>=0.2.0",
+    "google-auth-oauthlib>=1.2.0",
+    "pandas>=2.0.0",
+    "pydantic>=2.0.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+astropost = "astropost.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.0.0",
+    "pandas-stubs>=2.0.0",
+    "pytest>=8.0.0",
+    "ruff>=0.3.0",
+    "types-requests>=2.0.0",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+ignore_missing_imports = true
