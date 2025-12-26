@@ -30,16 +30,12 @@ def get_client() -> GmailClient:
     return GmailClient(str(TOKEN_PATH), str(CREDENTIALS_PATH))
 
 
-def cmd_list(args: argparse.Namespace) -> None:
-    client = get_client()
-    with console.status("[bold green]Fetching emails..."):
-        emails = client.list_emails(max_results=args.count)
-
+def render_email_table(emails: List[Email], title: str) -> None:
     if not emails:
         console.print("[yellow]No emails found.[/yellow]")
         return
 
-    table = Table(title=f"Latest {len(emails)} Emails")
+    table = Table(title=title)
     table.add_column("ID", style="cyan", no_wrap=True)
     table.add_column("Date", style="magenta")
     table.add_column("From", style="green")
@@ -52,8 +48,25 @@ def cmd_list(args: argparse.Namespace) -> None:
             str(email.sender)[:40],
             str(email.subject)[:60],
         )
-
     console.print(table)
+
+
+def cmd_list(args: argparse.Namespace) -> None:
+    client = get_client()
+    with console.status("[bold green]Fetching emails..."):
+        emails = client.list_emails(max_results=args.count)
+    render_email_table(emails, f"Latest {len(emails)} Emails")
+
+
+def cmd_search(args: argparse.Namespace) -> None:
+    client = get_client()
+    # Join args if multiple words provided without quotes
+    query = " ".join(args.query)
+
+    with console.status(f"[bold green]Searching for '{query}'..."):
+        emails = client.list_emails(max_results=args.count, query=query)
+
+    render_email_table(emails, f"Search Results: {len(emails)} found")
 
 
 def cmd_show(args: argparse.Namespace) -> None:
@@ -329,6 +342,16 @@ def main() -> None:
         "count", type=int, nargs="?", default=5, help="Number of emails to list"
     )
     parser_list.set_defaults(func=cmd_list)
+
+    # SEARCH
+    parser_search = subparsers.add_parser(
+        "search", help="Search emails (e.g. 'from:chuck', 'invoice')"
+    )
+    parser_search.add_argument("query", nargs="+", help="Search query")
+    parser_search.add_argument(
+        "count", type=int, nargs="?", default=10, help="Max results"
+    )
+    parser_search.set_defaults(func=cmd_search)
 
     # SCAN (Interactive List)
     parser_scan = subparsers.add_parser("scan", help="Interactive email scanner")
