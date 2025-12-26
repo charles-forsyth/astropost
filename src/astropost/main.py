@@ -1,7 +1,7 @@
 import argparse
 from pathlib import Path
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from rich.console import Console
 from rich.table import Table
@@ -85,7 +85,6 @@ def handle_reply(client: GmailClient, email_details: Dict[str, Any]) -> None:
 
     try:
         # Assuming sender is the one to reply to
-        # Extract email from "Name <email>" if possible, but client.send_email handles raw strings too
         recipient = email_details["from"]
 
         with console.status("[bold green]Sending reply..."):
@@ -132,7 +131,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
 
         console.print(table)
         console.print(
-            "\n[dim]Commands: # (read), d # (delete), a # (archive), u # (unread), r # (reply), q (quit)[/dim]"
+            "\n[dim]Commands: # (read), d # [#...] (delete), a # [#...] (archive), u # [#...] (unread), r # (reply), q (quit)[/dim]"
         )
 
         choice = Prompt.ask("Action")
@@ -140,7 +139,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
 
         if choice == "q":
             break
-        elif choice == "r":  # refresh
+        elif choice == "r" and len(choice) == 1:  # refresh only if single char
             continue
         elif not choice:
             continue
@@ -149,32 +148,44 @@ def cmd_scan(args: argparse.Namespace) -> None:
         parts = choice.split()
         cmd = parts[0]
 
-        # Determine target index
-        target_idx = -1
-        if cmd.isdigit():
-            # "1" -> Read
-            target_idx = int(cmd)
-            action = "read"
-        elif len(parts) > 1 and parts[1].isdigit():
-            # "d 1" -> Delete
-            target_idx = int(parts[1])
-            action = cmd
-        else:
-            action = "unknown"
+        indices: List[int] = []
+        action = "unknown"
 
-        if not (1 <= target_idx <= len(emails)):
-            if action != "unknown":
+        if cmd.isdigit():
+            # "1" -> Read single email
+            indices = [int(cmd)]
+            action = "read"
+        elif len(parts) > 1:
+            # "d 1 2 3" -> Multi-action
+            action = cmd
+            for p in parts[1:]:
+                if p.isdigit():
+                    indices.append(int(p))
+
+        # Validate indices
+        valid_indices = [i for i in indices if 1 <= i <= len(emails)]
+
+        if not valid_indices:
+            if (
+                action != "unknown" and action != "read"
+            ):  # Read usually handles one, loop handles multi
+                console.print("[red]No valid email numbers provided.[/red]")
+                import time
+
+                time.sleep(1)
+            elif action == "read" and indices and not valid_indices:
                 console.print("[red]Invalid email number.[/red]")
                 import time
 
                 time.sleep(1)
             continue
 
-        selected_email = emails[target_idx - 1]
-        msg_id = selected_email["id"]
+        # Single Read Action (Legacy behavior for single number)
+        if action == "read" and len(valid_indices) == 1:
+            target_idx = valid_indices[0]
+            selected_email = emails[target_idx - 1]
+            msg_id = selected_email["id"]
 
-        if action == "read":
-            # Read Mode
             console.clear()
             with console.status(f"[bold green]Loading email {target_idx}..."):
                 full_email = client.get_email_details(msg_id)
@@ -191,7 +202,6 @@ def cmd_scan(args: argparse.Namespace) -> None:
                     )
                 )
 
-                # Inner Read Loop
                 while True:
                     console.print(
                         "\n[dim]Actions: [r]eply, [d]elete, [a]rchive, [u]nread, [Enter] back[/dim]"
@@ -202,7 +212,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
                         break
                     elif sub_choice == "r":
                         handle_reply(client, full_email)
-                        break  # Return to list after reply? Or stay? Let's return to list.
+                        break
                     elif sub_choice == "d":
                         if Confirm.ask(f"Delete email '{full_email['subject']}'?"):
                             if client.trash_email(msg_id):
@@ -225,27 +235,47 @@ def cmd_scan(args: argparse.Namespace) -> None:
 
                             time.sleep(1)
                         break
+            continue
 
-        elif action == "d":
-            if Confirm.ask(f"Delete email #{target_idx}?"):
-                client.trash_email(msg_id)
-        elif action == "a":
-            client.modify_labels(msg_id, remove_labels=["INBOX"])
-            console.print(f"[green]Archived email #{target_idx}[/green]")
+        # Multi-Action Loop
+        if action in ["d", "a", "u"]:
+            # Confirmation for multiple deletes
+            if action == "d" and not Confirm.ask(
+                f"Delete {len(valid_indices)} emails?"
+            ):
+                continue
+
+            for target_idx in valid_indices:
+                selected_email = emails[target_idx - 1]
+                msg_id = selected_email["id"]
+
+                if action == "d":
+                    client.trash_email(msg_id)
+                    console.print(f"[red]Deleted #{target_idx}[/red]")
+                elif action == "a":
+                    client.modify_labels(msg_id, remove_labels=["INBOX"])
+                    console.print(f"[green]Archived #{target_idx}[/green]")
+                elif action == "u":
+                    client.modify_labels(msg_id, add_labels=["UNREAD"])
+                    console.print(f"[blue]Unread #{target_idx}[/blue]")
+
             import time
 
-            time.sleep(0.5)
-        elif action == "u":
-            client.modify_labels(msg_id, add_labels=["UNREAD"])
-            console.print(f"[green]Marked #{target_idx} as Unread[/green]")
-            import time
+            time.sleep(1.5)
 
-            time.sleep(0.5)
         elif action == "r":
-            with console.status(f"[bold green]Loading email {target_idx} for reply..."):
-                full_email = client.get_email_details(msg_id)
-            if full_email:
-                handle_reply(client, full_email)
+            # Reply only supports one at a time for now in this flow
+            if valid_indices:
+                target_idx = valid_indices[0]
+                selected_email = emails[target_idx - 1]
+                msg_id = selected_email["id"]
+
+                with console.status(
+                    f"[bold green]Loading email {target_idx} for reply..."
+                ):
+                    full_email = client.get_email_details(msg_id)
+                if full_email:
+                    handle_reply(client, full_email)
 
 
 def cmd_send(args: argparse.Namespace) -> None:
