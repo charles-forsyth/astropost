@@ -1,8 +1,6 @@
 import base64
 import mimetypes
-from typing import List, Optional, Dict, Any
-from email.message import EmailMessage
-from email import message_from_bytes
+from typing import List, Optional, Any
 from pathlib import Path
 
 from bs4 import BeautifulSoup
@@ -13,6 +11,16 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from rich.console import Console
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
+
+from astropost.models import Email
+from email.message import EmailMessage
+from email import message_from_bytes
 
 console = Console()
 
@@ -20,7 +28,7 @@ console = Console()
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/gmail.modify",  # Added for labeling/trashing
+    "https://www.googleapis.com/auth/gmail.modify",
 ]
 
 
@@ -63,7 +71,12 @@ class GmailClient:
                 token.write(creds.to_json())
         return creds
 
-    def list_emails(self, max_results: int = 10) -> List[Dict[str, Any]]:
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(HttpError),
+    )
+    def list_emails(self, max_results: int = 10) -> List[Email]:
         try:
             results = (
                 self.service.users()
@@ -84,11 +97,18 @@ class GmailClient:
                 console.print(
                     "[red]Permission denied. You may need to delete your token.json to re-authorize with new scopes.[/red]"
                 )
+                raise  # Re-raise to trigger retry or let caller handle
             else:
-                console.print(f"[red]Error listing emails: {e}[/red]")
+                # console.print(f"[red]Error listing emails: {e}[/red]")
+                raise
             return []
 
-    def get_email_details(self, msg_id: str) -> Dict[str, Any]:
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(HttpError),
+    )
+    def get_email_details(self, msg_id: str) -> Optional[Email]:
         try:
             msg = (
                 self.service.users()
@@ -99,23 +119,23 @@ class GmailClient:
             msg_raw = base64.urlsafe_b64decode(msg["raw"].encode("ASCII"))
             email_message = message_from_bytes(msg_raw)
 
-            subject = email_message["subject"]
-            sender = email_message["from"]
-            date = email_message["date"]
+            subject = email_message["subject"] or "(No Subject)"
+            sender = email_message["from"] or "Unknown"
+            date = email_message["date"] or ""
             snippet = msg.get("snippet", "")
 
-            return {
-                "id": msg_id,
-                "threadId": msg["threadId"],
-                "from": sender,
-                "subject": subject,
-                "date": date,
-                "snippet": snippet,
-                "body": self._get_email_body(email_message),
-            }
+            return Email(
+                id=msg_id,
+                threadId=msg["threadId"],
+                **{"from": sender},
+                subject=subject,
+                date=date,
+                snippet=snippet,
+                body=self._get_email_body(email_message),
+            )
         except HttpError as e:
             console.print(f"[red]Error fetching email {msg_id}: {e}[/red]")
-            return {}
+            return None
 
     def _get_email_body(self, email_message: Any) -> str:
         html_part: Optional[str] = None
@@ -182,26 +202,28 @@ class GmailClient:
 
         if reply_to_id:
             original = self.get_email_details(reply_to_id)
-            thread_id = original.get("threadId")
+            if original:
+                thread_id = original.threadId
 
-            if not subject:
-                original_subject = original.get("subject", "")
-                if not original_subject.lower().startswith("re:"):
-                    subject = f"Re: {original_subject}"
-                else:
-                    subject = original_subject
+                if not subject:
+                    original_subject = original.subject
+                    if not original_subject.lower().startswith("re:"):
+                        subject = f"Re: {original_subject}"
+                    else:
+                        subject = original_subject
 
-            quoted_info = f"\n\nOn {original.get('date')}, {original.get('from')} wrote:\n{original.get('snippet')}"
+                quoted_info = f"\n\nOn {original.date}, {original.sender} wrote:\n{original.snippet}"
 
         elif forward_id:
             original = self.get_email_details(forward_id)
-            if not subject:
-                original_subject = original.get("subject", "")
-                if not original_subject.lower().startswith("fwd:"):
-                    subject = f"Fwd: {original_subject}"
-                else:
-                    subject = original_subject
-            quoted_info = f"\n\n---------- Forwarded message ---------\nFrom: {original.get('from')}\nDate: {original.get('date')}\nSubject: {original.get('subject')}\n\n{original.get('body')}"
+            if original:
+                if not subject:
+                    original_subject = original.subject
+                    if not original_subject.lower().startswith("fwd:"):
+                        subject = f"Fwd: {original_subject}"
+                    else:
+                        subject = original_subject
+                quoted_info = f"\n\n---------- Forwarded message ---------\nFrom: {original.sender}\nDate: {original.date}\nSubject: {original.subject}\n\n{original.body}"
 
         full_body = body + (quoted_info if quoted_info else "")
         message.set_content(full_body)
@@ -264,6 +286,11 @@ class GmailClient:
         </html>
         """
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(HttpError),
+    )
     def modify_labels(
         self, msg_id: str, add_labels: List[str] = [], remove_labels: List[str] = []
     ) -> bool:
@@ -275,12 +302,17 @@ class GmailClient:
             return True
         except HttpError as e:
             console.print(f"[red]Error modifying labels for {msg_id}: {e}[/red]")
-            return False
+            raise
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(HttpError),
+    )
     def trash_email(self, msg_id: str) -> bool:
         try:
             self.service.users().messages().trash(userId="me", id=msg_id).execute()
             return True
         except HttpError as e:
             console.print(f"[red]Error trashing email {msg_id}: {e}[/red]")
-            return False
+            raise

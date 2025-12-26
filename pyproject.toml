@@ -1,6 +1,6 @@
 [project]
 name = "astropost"
-version = "0.1.5"
+version = "0.1.6"
 description = "A comprehensive email tool combining reporting, sending, and retrieval using modern Python practices."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,6 +12,7 @@ dependencies = [
     "pandas>=2.0.0",
     "pydantic>=2.0.0",
     "rich>=13.0.0",
+    "tenacity>=8.0.0",
 ]
 
 [project.scripts]
