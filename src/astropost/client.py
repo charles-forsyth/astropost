@@ -2,6 +2,7 @@ import base64
 import mimetypes
 from typing import List, Optional, Any
 from pathlib import Path
+import re
 
 from bs4 import BeautifulSoup
 from google.auth.transport.requests import Request
@@ -182,24 +183,17 @@ class GmailClient:
 
     def _sanitize_body(self, text: str) -> str:
         """
-        Cleans LLM-generated text by stripping Markdown code fences
-        (e.g., ```markdown ... ```) and excess whitespace.
+        Cleans LLM-generated text.
+        1. If a markdown code block (``` ... ```) is found, extracts the content inside.
+        2. Otherwise, returns the text stripped of whitespace.
         """
-        cleaned = text.strip()
-        # Remove ``` or ```markdown from the start
-        if cleaned.startswith("```"):
-            # Split by newline, remove first line if it starts with ```
-            lines = cleaned.splitlines()
-            if lines[0].strip().startswith("```"):
-                lines = lines[1:]
+        # Regex to match ```language ... ``` or just ``` ... ```
+        # DOTALL matches newlines
+        match = re.search(r"```(?:\w+)?\n(.*?)```", text, re.DOTALL)
+        if match:
+            return match.group(1).strip()
 
-            # Remove last line if it matches ```
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-
-            cleaned = "\n".join(lines).strip()
-
-        return cleaned
+        return text.strip()
 
     def send_email(
         self,
