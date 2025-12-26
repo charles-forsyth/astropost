@@ -1,6 +1,6 @@
 import base64
 import mimetypes
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 from pathlib import Path
 import re
 
@@ -78,14 +78,20 @@ class GmailClient:
         wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type(HttpError),
     )
-    def list_emails(self, max_results: int = 10) -> List[Email]:
+    def list_emails(
+        self, max_results: int = 10, query: Optional[str] = None
+    ) -> List[Email]:
         try:
-            results = (
-                self.service.users()
-                .messages()
-                .list(userId="me", labelIds=["INBOX"], maxResults=max_results)
-                .execute()
-            )
+            # If query is present, use 'q' parameter. If not, use labelIds=['INBOX'] default behavior?
+            # Actually, standard list behavior is usually inbox only unless specified.
+            # But search is broad.
+            kwargs: Dict[str, Any] = {"userId": "me", "maxResults": max_results}
+            if query:
+                kwargs["q"] = query
+            else:
+                kwargs["labelIds"] = ["INBOX"]
+
+            results = self.service.users().messages().list(**kwargs).execute()
             messages = results.get("messages", [])
 
             email_list = []
