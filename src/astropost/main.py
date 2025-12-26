@@ -4,6 +4,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
+from rich.prompt import Prompt
 
 from astropost.client import GmailClient
 
@@ -72,6 +73,78 @@ def cmd_show(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_scan(args: argparse.Namespace) -> None:
+    client = get_client()
+
+    while True:
+        console.clear()
+        with console.status("[bold green]Fetching latest emails..."):
+            emails = client.list_emails(max_results=args.count)
+
+        if not emails:
+            console.print("[yellow]No emails found.[/yellow]")
+            break
+
+        table = Table(title=f"Scan Mode: Latest {len(emails)} Emails")
+        table.add_column("#", style="bold yellow", justify="right")
+        table.add_column("From", style="green")
+        table.add_column("Subject", style="white")
+        table.add_column("Date", style="magenta")
+
+        for idx, email in enumerate(emails, 1):
+            table.add_row(
+                str(idx),
+                str(email["from"])[:30],
+                str(email["subject"])[:50],
+                str(email["date"])[:16],
+            )
+
+        console.print(table)
+        console.print("\n[dim]Enter # to read, 'r' to refresh, or 'q' to quit[/dim]")
+
+        choice = Prompt.ask("Select")
+
+        if choice.lower() == "q":
+            break
+        elif choice.lower() == "r":
+            continue
+
+        try:
+            idx = int(choice)
+            if 1 <= idx <= len(emails):
+                selected_email = emails[idx - 1]
+                console.clear()
+
+                # Re-fetch full details to ensure body is fresh/clean
+                with console.status(
+                    f"[bold green]Loading email {selected_email['id']}..."
+                ):
+                    full_email = client.get_email_details(selected_email["id"])
+
+                if full_email:
+                    console.print(
+                        Panel(
+                            f"[bold]From:[/bold] {full_email['from']}\n"
+                            f"[bold]Date:[/bold] {full_email['date']}\n"
+                            f"[bold]Subject:[/bold] {full_email['subject']}\n\n"
+                            f"{full_email['body']}",
+                            title=f"Email #{idx}: {full_email['subject']}",
+                            expand=False,
+                        )
+                    )
+                else:
+                    console.print("[red]Failed to load email details.[/red]")
+
+                Prompt.ask("\n[bold]Press Enter to return to list[/bold]")
+            else:
+                console.print("[red]Invalid number.[/red]")
+                import time
+
+                time.sleep(1)
+        except ValueError:
+            pass
+
+
 def cmd_send(args: argparse.Namespace) -> None:
     client = get_client()
 
@@ -121,6 +194,13 @@ def main() -> None:
         "count", type=int, nargs="?", default=5, help="Number of emails to list"
     )
     parser_list.set_defaults(func=cmd_list)
+
+    # SCAN (Interactive List)
+    parser_scan = subparsers.add_parser("scan", help="Interactive email scanner")
+    parser_scan.add_argument(
+        "count", type=int, nargs="?", default=10, help="Number of emails to scan"
+    )
+    parser_scan.set_defaults(func=cmd_scan)
 
     # SHOW
     parser_show = subparsers.add_parser("show", help="Show specific email details")

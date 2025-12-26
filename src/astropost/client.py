@@ -1,10 +1,11 @@
 import base64
 import mimetypes
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, cast
 from email.message import EmailMessage
 from email import message_from_bytes
 from pathlib import Path
 
+from bs4 import BeautifulSoup
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google.auth.exceptions import RefreshError
@@ -107,20 +108,48 @@ class GmailClient:
             return {}
 
     def _get_email_body(self, email_message: Any) -> str:
-        body = ""
+        html_part = None
+        text_part = None
+
         if email_message.is_multipart():
             for part in email_message.walk():
                 content_type = part.get_content_type()
                 content_disposition = str(part.get("Content-Disposition"))
-                if (
-                    content_type == "text/plain"
-                    and "attachment" not in content_disposition
-                ):
-                    body = part.get_payload(decode=True).decode(errors="replace")
-                    break
+
+                if "attachment" in content_disposition:
+                    continue
+
+                payload = part.get_payload(decode=True)
+                if not payload:
+                    continue
+
+                decoded_payload = payload.decode(errors="replace")
+
+                if content_type == "text/plain":
+                    text_part = decoded_payload
+                elif content_type == "text/html":
+                    html_part = decoded_payload
         else:
-            body = email_message.get_payload(decode=True).decode(errors="replace")
-        return body
+            payload = email_message.get_payload(decode=True)
+            if payload:
+                decoded = payload.decode(errors="replace")
+                if email_message.get_content_type() == "text/html":
+                    html_part = decoded
+                else:
+                    text_part = decoded
+
+        # Prefer text part, fall back to cleaned HTML
+        if text_part:
+            return text_part.strip()
+        elif html_part:
+            soup = BeautifulSoup(html_part, "html.parser")
+            # Remove scripts and styles
+            for script in soup(["script", "style"]):
+                script.decompose()
+            cleaned_text = soup.get_text(separator="\n").strip()
+            return cast(str, cleaned_text)
+
+        return ""
 
     def send_email(
         self,
