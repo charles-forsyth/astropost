@@ -1,6 +1,6 @@
 import base64
 import mimetypes
-from typing import List, Optional, Dict, Any, cast
+from typing import List, Optional, Dict, Any
 from email.message import EmailMessage
 from email import message_from_bytes
 from pathlib import Path
@@ -20,6 +20,7 @@ console = Console()
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.modify",  # Added for labeling/trashing
 ]
 
 
@@ -63,20 +64,29 @@ class GmailClient:
         return creds
 
     def list_emails(self, max_results: int = 10) -> List[Dict[str, Any]]:
-        results = (
-            self.service.users()
-            .messages()
-            .list(userId="me", labelIds=["INBOX"], maxResults=max_results)
-            .execute()
-        )
-        messages = results.get("messages", [])
+        try:
+            results = (
+                self.service.users()
+                .messages()
+                .list(userId="me", labelIds=["INBOX"], maxResults=max_results)
+                .execute()
+            )
+            messages = results.get("messages", [])
 
-        email_list = []
-        for msg_ref in messages:
-            details = self.get_email_details(msg_ref["id"])
-            if details:
-                email_list.append(details)
-        return email_list
+            email_list = []
+            for msg_ref in messages:
+                details = self.get_email_details(msg_ref["id"])
+                if details:
+                    email_list.append(details)
+            return email_list
+        except HttpError as e:
+            if e.resp.status == 403:
+                console.print(
+                    "[red]Permission denied. You may need to delete your token.json to re-authorize with new scopes.[/red]"
+                )
+            else:
+                console.print(f"[red]Error listing emails: {e}[/red]")
+            return []
 
     def get_email_details(self, msg_id: str) -> Dict[str, Any]:
         try:
@@ -108,8 +118,8 @@ class GmailClient:
             return {}
 
     def _get_email_body(self, email_message: Any) -> str:
-        html_part = None
-        text_part = None
+        html_part: Optional[str] = None
+        text_part: Optional[str] = None
 
         if email_message.is_multipart():
             for part in email_message.walk():
@@ -123,7 +133,7 @@ class GmailClient:
                 if not payload:
                     continue
 
-                decoded_payload = payload.decode(errors="replace")
+                decoded_payload = str(payload.decode(errors="replace"))
 
                 if content_type == "text/plain":
                     text_part = decoded_payload
@@ -132,7 +142,7 @@ class GmailClient:
         else:
             payload = email_message.get_payload(decode=True)
             if payload:
-                decoded = payload.decode(errors="replace")
+                decoded = str(payload.decode(errors="replace"))
                 if email_message.get_content_type() == "text/html":
                     html_part = decoded
                 else:
@@ -142,12 +152,13 @@ class GmailClient:
         if text_part:
             return text_part.strip()
         elif html_part:
-            soup = BeautifulSoup(html_part, "html.parser")
+            soup: Any = BeautifulSoup(html_part, "html.parser")
             # Remove scripts and styles
             for script in soup(["script", "style"]):
                 script.decompose()
             cleaned_text = soup.get_text(separator="\n").strip()
-            return cast(str, cleaned_text)
+            ret: str = str(cleaned_text)
+            return ret  # type: ignore[no-any-return, unused-ignore]
 
         return ""
 
@@ -252,3 +263,24 @@ class GmailClient:
           </body>
         </html>
         """
+
+    def modify_labels(
+        self, msg_id: str, add_labels: List[str] = [], remove_labels: List[str] = []
+    ) -> bool:
+        try:
+            body = {"addLabelIds": add_labels, "removeLabelIds": remove_labels}
+            self.service.users().messages().modify(
+                userId="me", id=msg_id, body=body
+            ).execute()
+            return True
+        except HttpError as e:
+            console.print(f"[red]Error modifying labels for {msg_id}: {e}[/red]")
+            return False
+
+    def trash_email(self, msg_id: str) -> bool:
+        try:
+            self.service.users().messages().trash(userId="me", id=msg_id).execute()
+            return True
+        except HttpError as e:
+            console.print(f"[red]Error trashing email {msg_id}: {e}[/red]")
+            return False

@@ -1,10 +1,12 @@
 import argparse
 from pathlib import Path
 
+from typing import Dict, Any
+
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from rich.prompt import Prompt
+from rich.prompt import Prompt, Confirm
 
 from astropost.client import GmailClient
 
@@ -73,6 +75,35 @@ def cmd_show(args: argparse.Namespace) -> None:
     )
 
 
+def handle_reply(client: GmailClient, email_details: Dict[str, Any]) -> None:
+    """Interactive reply flow."""
+    console.print(f"\n[bold]Replying to:[/bold] {email_details['subject']}")
+    body = Prompt.ask("Enter your reply (or 'cancel' to abort)")
+
+    if body.lower() == "cancel":
+        return
+
+    try:
+        # Assuming sender is the one to reply to
+        # Extract email from "Name <email>" if possible, but client.send_email handles raw strings too
+        recipient = email_details["from"]
+
+        with console.status("[bold green]Sending reply..."):
+            client.send_email(
+                recipients=[recipient],
+                subject="",  # Auto-handled by reply logic
+                body=body,
+                reply_to_id=email_details["id"],
+                from_address=DEFAULT_FROM,
+            )
+        console.print("[bold green]Reply sent![/bold green]")
+        import time
+
+        time.sleep(1.5)
+    except Exception as e:
+        console.print(f"[red]Failed to send reply: {e}[/red]")
+
+
 def cmd_scan(args: argparse.Namespace) -> None:
     client = get_client()
 
@@ -100,49 +131,121 @@ def cmd_scan(args: argparse.Namespace) -> None:
             )
 
         console.print(table)
-        console.print("\n[dim]Enter # to read, 'r' to refresh, or 'q' to quit[/dim]")
+        console.print(
+            "\n[dim]Commands: # (read), d # (delete), a # (archive), u # (unread), r # (reply), q (quit)[/dim]"
+        )
 
-        choice = Prompt.ask("Select")
+        choice = Prompt.ask("Action")
+        choice = choice.strip().lower()
 
-        if choice.lower() == "q":
+        if choice == "q":
             break
-        elif choice.lower() == "r":
+        elif choice == "r":  # refresh
+            continue
+        elif not choice:
             continue
 
-        try:
-            idx = int(choice)
-            if 1 <= idx <= len(emails):
-                selected_email = emails[idx - 1]
-                console.clear()
+        # Parse command
+        parts = choice.split()
+        cmd = parts[0]
 
-                # Re-fetch full details to ensure body is fresh/clean
-                with console.status(
-                    f"[bold green]Loading email {selected_email['id']}..."
-                ):
-                    full_email = client.get_email_details(selected_email["id"])
+        # Determine target index
+        target_idx = -1
+        if cmd.isdigit():
+            # "1" -> Read
+            target_idx = int(cmd)
+            action = "read"
+        elif len(parts) > 1 and parts[1].isdigit():
+            # "d 1" -> Delete
+            target_idx = int(parts[1])
+            action = cmd
+        else:
+            action = "unknown"
 
-                if full_email:
-                    console.print(
-                        Panel(
-                            f"[bold]From:[/bold] {full_email['from']}\n"
-                            f"[bold]Date:[/bold] {full_email['date']}\n"
-                            f"[bold]Subject:[/bold] {full_email['subject']}\n\n"
-                            f"{full_email['body']}",
-                            title=f"Email #{idx}: {full_email['subject']}",
-                            expand=False,
-                        )
-                    )
-                else:
-                    console.print("[red]Failed to load email details.[/red]")
-
-                Prompt.ask("\n[bold]Press Enter to return to list[/bold]")
-            else:
-                console.print("[red]Invalid number.[/red]")
+        if not (1 <= target_idx <= len(emails)):
+            if action != "unknown":
+                console.print("[red]Invalid email number.[/red]")
                 import time
 
                 time.sleep(1)
-        except ValueError:
-            pass
+            continue
+
+        selected_email = emails[target_idx - 1]
+        msg_id = selected_email["id"]
+
+        if action == "read":
+            # Read Mode
+            console.clear()
+            with console.status(f"[bold green]Loading email {target_idx}..."):
+                full_email = client.get_email_details(msg_id)
+
+            if full_email:
+                console.print(
+                    Panel(
+                        f"[bold]From:[/bold] {full_email['from']}\n"
+                        f"[bold]Date:[/bold] {full_email['date']}\n"
+                        f"[bold]Subject:[/bold] {full_email['subject']}\n\n"
+                        f"{full_email['body']}",
+                        title=f"Email #{target_idx}",
+                        expand=False,
+                    )
+                )
+
+                # Inner Read Loop
+                while True:
+                    console.print(
+                        "\n[dim]Actions: [r]eply, [d]elete, [a]rchive, [u]nread, [Enter] back[/dim]"
+                    )
+                    sub_choice = Prompt.ask("Select").strip().lower()
+
+                    if sub_choice == "":
+                        break
+                    elif sub_choice == "r":
+                        handle_reply(client, full_email)
+                        break  # Return to list after reply? Or stay? Let's return to list.
+                    elif sub_choice == "d":
+                        if Confirm.ask(f"Delete email '{full_email['subject']}'?"):
+                            if client.trash_email(msg_id):
+                                console.print("[green]Deleted.[/green]")
+                                import time
+
+                                time.sleep(1)
+                            break
+                    elif sub_choice == "a":
+                        if client.modify_labels(msg_id, remove_labels=["INBOX"]):
+                            console.print("[green]Archived.[/green]")
+                            import time
+
+                            time.sleep(1)
+                        break
+                    elif sub_choice == "u":
+                        if client.modify_labels(msg_id, add_labels=["UNREAD"]):
+                            console.print("[green]Marked as Unread.[/green]")
+                            import time
+
+                            time.sleep(1)
+                        break
+
+        elif action == "d":
+            if Confirm.ask(f"Delete email #{target_idx}?"):
+                client.trash_email(msg_id)
+        elif action == "a":
+            client.modify_labels(msg_id, remove_labels=["INBOX"])
+            console.print(f"[green]Archived email #{target_idx}[/green]")
+            import time
+
+            time.sleep(0.5)
+        elif action == "u":
+            client.modify_labels(msg_id, add_labels=["UNREAD"])
+            console.print(f"[green]Marked #{target_idx} as Unread[/green]")
+            import time
+
+            time.sleep(0.5)
+        elif action == "r":
+            with console.status(f"[bold green]Loading email {target_idx} for reply..."):
+                full_email = client.get_email_details(msg_id)
+            if full_email:
+                handle_reply(client, full_email)
 
 
 def cmd_send(args: argparse.Namespace) -> None:
