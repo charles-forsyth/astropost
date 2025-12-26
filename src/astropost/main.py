@@ -285,6 +285,10 @@ def cmd_send(args: argparse.Namespace) -> None:
             body = f.read()
     elif args.body:
         body = args.body
+    elif not sys.stdin.isatty():
+        # Read from pipe if body is empty and stdin is not a TTY
+        with console.status("[bold green]Reading from stdin..."):
+            body = sys.stdin.read()
 
     # Validation
     if not body and not args.reply_to_id and not args.forward_id:
