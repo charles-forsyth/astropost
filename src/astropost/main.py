@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
@@ -8,13 +9,20 @@ from astropost.client import GmailClient
 
 console = Console()
 
-# Configuration (could be moved to env vars or config file)
-TOKEN_PATH = "/home/chuck/Scripts/token_combined.json"  # New unified token
-CREDENTIALS_PATH = "/home/chuck/Scripts/credentials.json"
+# Configuration
+CONFIG_DIR = Path.home() / ".config" / "astropost"
+TOKEN_PATH = CONFIG_DIR / "token.json"
+CREDENTIALS_PATH = CONFIG_DIR / "credentials.json"
+
+DEFAULT_FROM = "Charles Forsyth <forsythc@ucr.edu>"
 
 
 def get_client() -> GmailClient:
-    return GmailClient(TOKEN_PATH, CREDENTIALS_PATH)
+    if not CONFIG_DIR.exists():
+        console.print(f"[yellow]Creating config directory at {CONFIG_DIR}[/yellow]")
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+    return GmailClient(str(TOKEN_PATH), str(CREDENTIALS_PATH))
 
 
 def cmd_list(args: argparse.Namespace) -> None:
@@ -80,7 +88,10 @@ def cmd_send(args: argparse.Namespace) -> None:
         if not args.yes:
             console.print("[yellow]Warning: Sending email with empty body.[/yellow]")
 
-    with console.status("[bold green]Sending email..."):
+    # Determine sender address
+    sender = args.from_address if args.from_address else DEFAULT_FROM
+
+    with console.status(f"[bold green]Sending email from {sender}..."):
         msg_id = client.send_email(
             recipients=args.recipients,
             subject=args.subject,
@@ -90,6 +101,7 @@ def cmd_send(args: argparse.Namespace) -> None:
             attachments=args.attach,
             reply_to_id=args.reply_to_id,
             forward_id=args.forward_id,
+            from_address=sender,
         )
 
     console.print(f"[bold green]Email sent successfully! ID: {msg_id}[/bold green]")
@@ -124,6 +136,9 @@ def main() -> None:
     parser_send.add_argument("--body", "-b", help="Body text")
     parser_send.add_argument(
         "--file", "-f", dest="input_file", help="File containing body text"
+    )
+    parser_send.add_argument(
+        "--from", "-F", dest="from_address", help="Sender address (overrides default)"
     )
     parser_send.add_argument("--attach", "-a", nargs="*", help="Attachments")
     parser_send.add_argument("--cc", nargs="*", help="CC recipients")

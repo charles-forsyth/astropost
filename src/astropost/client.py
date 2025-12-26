@@ -132,6 +132,7 @@ class GmailClient:
         attachments: Optional[List[str]] = None,
         reply_to_id: Optional[str] = None,
         forward_id: Optional[str] = None,
+        from_address: Optional[str] = None,
     ) -> str:
         message = EmailMessage()
 
@@ -169,7 +170,7 @@ class GmailClient:
         message.add_alternative(html_content, subtype="html")
 
         message["To"] = ", ".join(recipients)
-        message["From"] = "me"
+        message["From"] = from_address if from_address else "me"
         message["Subject"] = subject
 
         if cc:
