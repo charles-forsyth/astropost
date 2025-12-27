@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 import sys
+import subprocess
 
 from typing import List
 
@@ -67,6 +68,44 @@ def cmd_search(args: argparse.Namespace) -> None:
         emails = client.list_emails(max_results=args.count, query=query)
 
     render_email_table(emails, f"Search Results: {len(emails)} found")
+
+
+def cmd_summarize(args: argparse.Namespace) -> None:
+    client = get_client()
+
+    # Fetch Unread Emails
+    with console.status(f"[bold green]Fetching last {args.count} unread emails..."):
+        emails = client.list_emails(max_results=args.count, label_ids=["UNREAD"])
+
+    if not emails:
+        console.print("[yellow]No unread emails found to summarize.[/yellow]")
+        return
+
+    console.print(
+        f"[green]Found {len(emails)} unread emails. Generating summary...[/green]"
+    )
+
+    # Construct Prompt
+    prompt_content = "Please summarize the following emails into a useful daily briefing. Group by topic if possible.\n\n"
+    for email in emails:
+        prompt_content += f"--- EMAIL ---\nFrom: {email.sender}\nSubject: {email.subject}\nDate: {email.date}\nBody:\n{email.body[:1500]}\n\n"  # Truncate body to save context
+
+    # Call Gemini CLI
+    try:
+        # User explicitly asked for gemini-3-pro-preview.
+        cmd = ["gemini", "-p", prompt_content, "--model", "gemini-2.0-flash"]
+
+        process = subprocess.run(cmd, text=True, capture_output=True)
+
+        if process.returncode == 0:
+            console.print(
+                Panel(process.stdout, title="Inbox Summary", border_style="bold blue")
+            )
+        else:
+            console.print(f"[red]Gemini Error:[/red] {process.stderr}")
+
+    except FileNotFoundError:
+        console.print("[red]Error: 'gemini' CLI not found. Please install it.[/red]")
 
 
 def cmd_show(args: argparse.Namespace) -> None:
@@ -352,6 +391,13 @@ def main() -> None:
         "count", type=int, nargs="?", default=10, help="Max results"
     )
     parser_search.set_defaults(func=cmd_search)
+
+    # SUMMARIZE
+    parser_summ = subparsers.add_parser("summarize", help="Summarize unread emails")
+    parser_summ.add_argument(
+        "count", type=int, nargs="?", default=10, help="Number of emails to summarize"
+    )
+    parser_summ.set_defaults(func=cmd_summarize)
 
     # SCAN (Interactive List)
     parser_scan = subparsers.add_parser("scan", help="Interactive email scanner")
