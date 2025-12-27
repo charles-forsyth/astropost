@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
+from rich.markdown import Markdown
 from dotenv import load_dotenv
 from google import genai
 
@@ -116,11 +117,10 @@ def cmd_summarize(args: argparse.Namespace) -> None:
                 model="gemini-2.0-flash", contents=prompt_content
             )
 
-            text = (
-                response.text
-                or "No summary generated (possibly due to safety filters)."
+            text = response.text or "No summary generated."
+            console.print(
+                Panel(Markdown(text), title="Inbox Summary", border_style="bold blue")
             )
-            console.print(Panel(text, title="Inbox Summary", border_style="bold blue"))
 
     except Exception as e:
         console.print(f"[red]Gemini API Error:[/red] {e}")
