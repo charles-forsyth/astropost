@@ -1,7 +1,7 @@
 import argparse
 from pathlib import Path
 import sys
-import subprocess
+import os
 
 from typing import List
 
@@ -9,6 +9,8 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
+from dotenv import load_dotenv
+import google.generativeai as genai
 
 from astropost.client import GmailClient
 from astropost.models import Email
@@ -19,6 +21,7 @@ console = Console()
 CONFIG_DIR = Path.home() / ".config" / "astropost"
 TOKEN_PATH = CONFIG_DIR / "token.json"
 CREDENTIALS_PATH = CONFIG_DIR / "credentials.json"
+ENV_PATH = CONFIG_DIR / ".env"
 
 DEFAULT_FROM = "Charles Forsyth <forsythc@ucr.edu>"
 
@@ -71,6 +74,20 @@ def cmd_search(args: argparse.Namespace) -> None:
 
 
 def cmd_summarize(args: argparse.Namespace) -> None:
+    # Load API Key
+    if not ENV_PATH.exists():
+        console.print(f"[red]Error: .env file not found at {ENV_PATH}.[/red]")
+        console.print("Please create it with: GEMINI_API_KEY=your_key_here")
+        return
+
+    load_dotenv(ENV_PATH)
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        console.print("[red]Error: GEMINI_API_KEY not found in .env file.[/red]")
+        return
+
+    genai.configure(api_key=api_key)  # type: ignore[attr-defined]
+
     client = get_client()
 
     # Fetch Unread Emails
@@ -88,24 +105,20 @@ def cmd_summarize(args: argparse.Namespace) -> None:
     # Construct Prompt
     prompt_content = "Please summarize the following emails into a useful daily briefing. Group by topic if possible.\n\n"
     for email in emails:
-        prompt_content += f"--- EMAIL ---\nFrom: {email.sender}\nSubject: {email.subject}\nDate: {email.date}\nBody:\n{email.body[:1500]}\n\n"  # Truncate body to save context
+        prompt_content += f"--- EMAIL ---\nFrom: {email.sender}\nSubject: {email.subject}\nDate: {email.date}\nBody:\n{email.body[:1500]}\n\n"
 
-    # Call Gemini CLI
     try:
-        # User explicitly asked for gemini-3-pro-preview.
-        cmd = ["gemini", "-p", prompt_content, "--model", "gemini-2.0-flash"]
+        with console.status("[bold cyan]Querying Gemini 3.0 Pro..."):
+            # Using the requested model
+            model = genai.GenerativeModel("gemini-3-pro-preview")  # type: ignore
+            response = model.generate_content(prompt_content)
 
-        process = subprocess.run(cmd, text=True, capture_output=True)
-
-        if process.returncode == 0:
             console.print(
-                Panel(process.stdout, title="Inbox Summary", border_style="bold blue")
+                Panel(response.text, title="Inbox Summary", border_style="bold blue")
             )
-        else:
-            console.print(f"[red]Gemini Error:[/red] {process.stderr}")
 
-    except FileNotFoundError:
-        console.print("[red]Error: 'gemini' CLI not found. Please install it.[/red]")
+    except Exception as e:
+        console.print(f"[red]Gemini API Error:[/red] {e}")
 
 
 def cmd_show(args: argparse.Namespace) -> None:
