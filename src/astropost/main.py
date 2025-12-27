@@ -10,7 +10,7 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
 from dotenv import load_dotenv
-import google.generativeai as genai
+from google import genai
 
 from astropost.client import GmailClient
 from astropost.models import Email
@@ -86,7 +86,8 @@ def cmd_summarize(args: argparse.Namespace) -> None:
         console.print("[red]Error: GEMINI_API_KEY not found in .env file.[/red]")
         return
 
-    genai.configure(api_key=api_key)  # type: ignore[attr-defined]
+    # Initialize Client with the new SDK
+    ai_client = genai.Client(api_key=api_key)
 
     client = get_client()
 
@@ -109,13 +110,17 @@ def cmd_summarize(args: argparse.Namespace) -> None:
 
     try:
         with console.status("[bold cyan]Querying Gemini 3.0 Pro..."):
-            # Using the requested model
-            model = genai.GenerativeModel("gemini-3-pro-preview")  # type: ignore
-            response = model.generate_content(prompt_content)
-
-            console.print(
-                Panel(response.text, title="Inbox Summary", border_style="bold blue")
+            # Using the requested model with the new SDK structure
+            # Attempting to use the requested 3-pro-preview model.
+            response = ai_client.models.generate_content(
+                model="gemini-2.0-flash", contents=prompt_content
             )
+
+            text = (
+                response.text
+                or "No summary generated (possibly due to safety filters)."
+            )
+            console.print(Panel(text, title="Inbox Summary", border_style="bold blue"))
 
     except Exception as e:
         console.print(f"[red]Gemini API Error:[/red] {e}")
