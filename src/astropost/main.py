@@ -92,14 +92,17 @@ def cmd_summarize(args: argparse.Namespace) -> None:
 
     client = get_client()
 
-    # Fetch Unread Emails
-    with console.status(f"[bold green]Fetching last {args.count} unread emails..."):
-        emails = client.list_emails(max_results=args.count, label_ids=["UNREAD"])
+    # Fetch Unread Emails in Inbox
+    with console.status(
+        f"[bold green]Fetching last {args.count} unread emails in Inbox..."
+    ):
+        emails = client.list_emails(
+            max_results=args.count, label_ids=["UNREAD", "INBOX"]
+        )
 
     if not emails:
-        console.print("[yellow]No unread emails found to summarize.[/yellow]")
+        console.print("[yellow]No unread emails found in Inbox to summarize.[/yellow]")
         return
-
     console.print(
         f"[green]Found {len(emails)} unread emails. Generating summary...[/green]"
     )
