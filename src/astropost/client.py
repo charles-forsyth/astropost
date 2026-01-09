@@ -318,7 +318,7 @@ class GmailClient:
         return f"""
         <html>
           <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <div style="max-width: 600px; margin: 0 auto;">
+            <div style="max-width: 600px; margin: 0;">
               {html_content}
             </div>
           </body>
