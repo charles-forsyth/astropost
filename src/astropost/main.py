@@ -60,7 +60,18 @@ def cmd_list(args: argparse.Namespace) -> None:
     client = get_client()
     with console.status("[bold green]Fetching emails..."):
         emails = client.list_emails(max_results=args.count)
-    render_email_table(emails, f"Latest {len(emails)} Emails")
+
+    if args.json:
+        import json
+
+        # Pydantic v2 uses model_dump or model_dump_json
+        # serializing a list of models:
+        json_output = json.dumps(
+            [e.model_dump(by_alias=True) for e in emails], indent=2
+        )
+        print(json_output)
+    else:
+        render_email_table(emails, f"Latest {len(emails)} Emails")
 
 
 def cmd_search(args: argparse.Namespace) -> None:
@@ -138,16 +149,19 @@ def cmd_show(args: argparse.Namespace) -> None:
         console.print(f"[red]Email {args.id} not found.[/red]")
         return
 
-    console.print(
-        Panel(
-            f"[bold]From:[/bold] {email.sender}\n"
-            f"[bold]Date:[/bold] {email.date}\n"
-            f"[bold]Subject:[/bold] {email.subject}\n\n"
-            f"{email.body}",
-            title=f"Email ID: {email.id}",
-            expand=False,
+    if args.json:
+        print(email.model_dump_json(indent=2, by_alias=True))
+    else:
+        console.print(
+            Panel(
+                f"[bold]From:[/bold] {email.sender}\n"
+                f"[bold]Date:[/bold] {email.date}\n"
+                f"[bold]Subject:[/bold] {email.subject}\n\n"
+                f"{email.body}",
+                title=f"Email ID: {email.id}",
+                expand=False,
+            )
         )
-    )
 
 
 def handle_reply(client: GmailClient, email_details: Email) -> None:
@@ -401,6 +415,9 @@ def main() -> None:
     parser_list.add_argument(
         "count", type=int, nargs="?", default=5, help="Number of emails to list"
     )
+    parser_list.add_argument(
+        "--json", action="store_true", help="Output in JSON format"
+    )
     parser_list.set_defaults(func=cmd_list)
 
     # SEARCH
@@ -430,6 +447,9 @@ def main() -> None:
     # SHOW
     parser_show = subparsers.add_parser("show", help="Show specific email details")
     parser_show.add_argument("id", help="Message ID")
+    parser_show.add_argument(
+        "--json", action="store_true", help="Output in JSON format"
+    )
     parser_show.set_defaults(func=cmd_show)
 
     # SEND
