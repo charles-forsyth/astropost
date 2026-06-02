@@ -629,32 +629,16 @@ class GmailClient:
             thread = (
                 self.service.users()
                 .threads()
-                .get(userId="me", id=thread_id, format="raw")
+                .get(userId="me", id=thread_id, format="minimal")
                 .execute()
             )
             messages = thread.get("messages", [])
             email_list = []
             for m in messages:
                 msg_id = m["id"]
-                msg_raw = base64.urlsafe_b64decode(m["raw"].encode("ASCII"))
-                email_message = message_from_bytes(msg_raw)
-
-                subject = email_message["subject"] or "(No Subject)"
-                sender = email_message["from"] or "Unknown"
-                date = email_message["date"] or ""
-                snippet = m.get("snippet", "")
-
-                email_list.append(
-                    Email(
-                        id=msg_id,
-                        threadId=thread_id,
-                        **{"from": sender},
-                        subject=subject,
-                        date=date,
-                        snippet=snippet,
-                        body=self._get_email_body(email_message),
-                    )
-                )
+                email_detail = self.get_email_details(msg_id)
+                if email_detail:
+                    email_list.append(email_detail)
             return email_list
         except Exception as e:
             console.print(f"[red]Error fetching thread {thread_id}: {e}[/red]")
