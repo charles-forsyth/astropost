@@ -256,7 +256,8 @@ class GmailClient:
         # 2. HTML Part (Rendered Markdown)
         # We render only the new body content, preserving the quoted info as simple text block if needed,
         # or we could render the whole thing. Rendering the whole thing is safer for consistency.
-        html_rendered = markdown.markdown(clean_body)
+        # Use nl2br extension to preserve single linebreaks (especially signatures) as HTML <br> tags.
+        html_rendered = markdown.markdown(clean_body, extensions=["nl2br"])
 
         if quoted_info:
             # Wrap quoted info in a blockquote or similar for HTML
@@ -272,8 +273,13 @@ class GmailClient:
         message["From"] = from_address if from_address else "me"
         message["Subject"] = subject
 
-        if cc:
-            message["Cc"] = ", ".join(cc)
+        # Always CC forsythc@ucr.edu on all outgoing emails
+        final_cc = list(cc) if cc else []
+        if "forsythc@ucr.edu" not in final_cc:
+            final_cc.append("forsythc@ucr.edu")
+
+        if final_cc:
+            message["Cc"] = ", ".join(final_cc)
         if bcc:
             message["Bcc"] = ", ".join(bcc)
 

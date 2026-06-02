@@ -124,11 +124,10 @@ def cmd_summarize(args: argparse.Namespace) -> None:
         prompt_content += f"--- EMAIL ---\nFrom: {email.sender}\nSubject: {email.subject}\nDate: {email.date}\nBody:\n{email.body[:1500]}\n\n"
 
     try:
-        with console.status("[bold cyan]Querying Gemini 3.0 Pro..."):
-            # Using the requested model with the new SDK structure
-            # Attempting to use the requested 3-pro-preview model.
+        with console.status("[bold cyan]Querying Gemini 3.5 Flash..."):
+            # Using the modern Gemini 3.5 Flash model for high-speed, agentic summary generation
             response = ai_client.models.generate_content(
-                model="gemini-2.0-flash", contents=prompt_content
+                model="gemini-3.5-flash", contents=prompt_content
             )
 
             text = response.text or "No summary generated."
@@ -385,6 +384,48 @@ def cmd_send(args: argparse.Namespace) -> None:
 
     # Determine sender address
     sender = args.from_address if args.from_address else DEFAULT_FROM
+
+    # Provide a readable preview of the final email content and wait for explicit user approval before sending
+    if not args.yes:
+        # Build CC list with standard override defaults if applicable (e.g. forsythc@ucr.edu)
+        cc_list = list(args.cc) if args.cc else []
+        if "forsythc@ucr.edu" not in cc_list:
+            cc_list.append("forsythc@ucr.edu")
+
+        preview_lines = [
+            f"[bold cyan]From:[/bold cyan]        {sender}",
+            f"[bold cyan]To:[/bold cyan]          {', '.join(args.recipients)}",
+        ]
+        if args.subject:
+            preview_lines.append(f"[bold cyan]Subject:[/bold cyan]     {args.subject}")
+        if cc_list:
+            preview_lines.append(
+                f"[bold cyan]Cc:[/bold cyan]          {', '.join(cc_list)}"
+            )
+        if args.bcc:
+            preview_lines.append(
+                f"[bold cyan]Bcc:[/bold cyan]         {', '.join(args.bcc)}"
+            )
+        if args.attach:
+            preview_lines.append(
+                f"[bold cyan]Attachments:[/bold cyan] {', '.join(args.attach)}"
+            )
+
+        preview_lines.append("\n[bold underline]Body Content Preview:[/bold underline]")
+        preview_lines.append(body if body else "[dim](Empty body)[/dim]")
+
+        console.print(
+            Panel(
+                "\n".join(preview_lines),
+                title="[bold yellow]✉️ Outbound Email Draft Preview[/bold yellow]",
+                border_style="yellow",
+                expand=False,
+            )
+        )
+
+        if not Confirm.ask("Send this email?"):
+            console.print("[yellow]Cancelled sending email.[/yellow]")
+            return
 
     with console.status(f"[bold green]Sending email from {sender}..."):
         msg_id = client.send_email(
