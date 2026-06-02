@@ -56,6 +56,29 @@ def render_email_table(emails: List[Email], title: str) -> None:
     console.print(table)
 
 
+def spawn_editor(initial_content: str = "") -> str:
+    import subprocess
+    import tempfile
+
+    editor = os.environ.get("EDITOR", "nano")
+    with tempfile.NamedTemporaryFile(
+        suffix=".md", delete=False, mode="w+", encoding="utf-8"
+    ) as temp_file:
+        temp_file.write(initial_content)
+        temp_file_path = temp_file.name
+
+    try:
+        subprocess.run([editor, temp_file_path], check=True)
+        with open(temp_file_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        console.print(f"[red]Error invoking editor {editor}: {e}[/red]")
+        return initial_content
+    finally:
+        if os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)
+
+
 def cmd_list(args: argparse.Namespace) -> None:
     client = get_client()
     with console.status("[bold green]Fetching emails..."):
@@ -64,8 +87,6 @@ def cmd_list(args: argparse.Namespace) -> None:
     if args.json:
         import json
 
-        # Pydantic v2 uses model_dump or model_dump_json
-        # serializing a list of models:
         json_output = json.dumps(
             [e.model_dump(by_alias=True) for e in emails], indent=2
         )
@@ -76,7 +97,6 @@ def cmd_list(args: argparse.Namespace) -> None:
 
 def cmd_search(args: argparse.Namespace) -> None:
     client = get_client()
-    # Join args if multiple words provided without quotes
     query = " ".join(args.query)
 
     with console.status(f"[bold green]Searching for '{query}'..."):
@@ -86,7 +106,6 @@ def cmd_search(args: argparse.Namespace) -> None:
 
 
 def cmd_summarize(args: argparse.Namespace) -> None:
-    # Load API Key
     if not ENV_PATH.exists():
         console.print(f"[red]Error: .env file not found at {ENV_PATH}.[/red]")
         console.print("Please create it with: GEMINI_API_KEY=your_key_here")
@@ -98,12 +117,9 @@ def cmd_summarize(args: argparse.Namespace) -> None:
         console.print("[red]Error: GEMINI_API_KEY not found in .env file.[/red]")
         return
 
-    # Initialize Client with the new SDK
     ai_client = genai.Client(api_key=api_key)
-
     client = get_client()
 
-    # Fetch Unread Emails in Inbox
     with console.status(
         f"[bold green]Fetching last {args.count} unread emails in Inbox..."
     ):
@@ -118,14 +134,12 @@ def cmd_summarize(args: argparse.Namespace) -> None:
         f"[green]Found {len(emails)} unread emails. Generating summary...[/green]"
     )
 
-    # Construct Prompt
     prompt_content = "Please summarize the following emails into a useful daily briefing. Group by topic if possible.\n\n"
     for email in emails:
         prompt_content += f"--- EMAIL ---\nFrom: {email.sender}\nSubject: {email.subject}\nDate: {email.date}\nBody:\n{email.body[:1500]}\n\n"
 
     try:
         with console.status("[bold cyan]Querying Gemini 3.5 Flash..."):
-            # Using the modern Gemini 3.5 Flash model for high-speed, agentic summary generation
             response = ai_client.models.generate_content(
                 model="gemini-3.5-flash", contents=prompt_content
             )
@@ -166,13 +180,21 @@ def cmd_show(args: argparse.Namespace) -> None:
 def handle_reply(client: GmailClient, email_details: Email) -> None:
     """Interactive reply flow."""
     console.print(f"\n[bold]Replying to:[/bold] {email_details.subject}")
-    body = Prompt.ask("Enter your reply (or 'cancel' to abort)")
+    body = Prompt.ask(
+        "Enter your reply [dim](or press Enter to open editor, 'cancel' to abort)[/dim]",
+        default="",
+    )
 
     if body.lower() == "cancel":
         return
 
+    if not body:
+        body = spawn_editor()
+        if not body or body.strip() == "":
+            console.print("[yellow]Empty reply body. Aborting reply.[/yellow]")
+            return
+
     try:
-        # Assuming sender is the one to reply to
         recipient = email_details.sender
 
         with console.status("[bold green]Sending reply..."):
@@ -227,12 +249,11 @@ def cmd_scan(args: argparse.Namespace) -> None:
 
         if choice == "q":
             break
-        elif choice == "r" and len(choice) == 1:  # refresh only if single char
+        elif choice == "r" and len(choice) == 1:
             continue
         elif not choice:
             continue
 
-        # Parse command
         parts = choice.split()
         cmd = parts[0]
 
@@ -240,17 +261,14 @@ def cmd_scan(args: argparse.Namespace) -> None:
         action = "unknown"
 
         if cmd.isdigit():
-            # "1" -> Read single email
             indices = [int(cmd)]
             action = "read"
         elif len(parts) > 1:
-            # "d 1 2 3" -> Multi-action
             action = cmd
             for p in parts[1:]:
                 if p.isdigit():
                     indices.append(int(p))
 
-        # Validate indices
         valid_indices = [i for i in indices if 1 <= i <= len(emails)]
 
         if not valid_indices:
@@ -266,7 +284,6 @@ def cmd_scan(args: argparse.Namespace) -> None:
                 time.sleep(1)
             continue
 
-        # Single Read Action (Legacy behavior for single number)
         if action == "read" and len(valid_indices) == 1:
             target_idx = valid_indices[0]
             selected_email = emails[target_idx - 1]
@@ -323,7 +340,6 @@ def cmd_scan(args: argparse.Namespace) -> None:
                         break
             continue
 
-        # Multi-Action Loop
         if action in ["d", "a", "u"]:
             if action == "d" and not Confirm.ask(
                 f"Delete {len(valid_indices)} emails?"
@@ -372,22 +388,18 @@ def cmd_send(args: argparse.Namespace) -> None:
     elif args.body:
         body = args.body
     elif not sys.stdin.isatty():
-        # Read from pipe if body is empty and stdin is not a TTY
         with console.status("[bold green]Reading from stdin..."):
             body = sys.stdin.read()
+    else:
+        body = spawn_editor()
 
-    # Validation
     if not body and not args.reply_to_id and not args.forward_id:
-        # Allow empty body for quick replies if needed, but warn
         if not args.yes:
             console.print("[yellow]Warning: Sending email with empty body.[/yellow]")
 
-    # Determine sender address
     sender = args.from_address if args.from_address else DEFAULT_FROM
 
-    # Provide a readable preview of the final email content and wait for explicit user approval before sending
     if not args.yes:
-        # Build CC list with standard override defaults if applicable (e.g. forsythc@ucr.edu)
         cc_list = list(args.cc) if args.cc else []
         if "forsythc@ucr.edu" not in cc_list:
             cc_list.append("forsythc@ucr.edu")
@@ -441,6 +453,197 @@ def cmd_send(args: argparse.Namespace) -> None:
         )
 
     console.print(f"[bold green]Email sent successfully! ID: {msg_id}[/bold green]")
+
+
+def cmd_drafts(args: argparse.Namespace) -> None:
+    client = get_client()
+    if args.draft_action in ["list", "ls"]:
+        count = getattr(args, "count", 10)
+        with console.status("[bold green]Fetching drafts..."):
+            drafts = client.list_drafts(max_results=count)
+        if not drafts:
+            console.print("[yellow]No drafts found.[/yellow]")
+            return
+        table = Table(title="Gmail Drafts")
+        table.add_column("Draft ID", style="cyan", no_wrap=True)
+        table.add_column("Subject", style="white")
+        table.add_column("From/Sender", style="green")
+        for d in drafts:
+            details = d["details"]
+            subj = details.subject if details else "(Unknown)"
+            sender = details.sender if details else "(Unknown)"
+            table.add_row(d["id"], subj[:60], sender[:40])
+        console.print(table)
+
+    elif args.draft_action in ["create", "write"]:
+        body = ""
+        if args.input_file:
+            with open(args.input_file, "r") as f:
+                body = f.read()
+        elif args.body:
+            body = args.body
+        elif not sys.stdin.isatty():
+            with console.status("[bold green]Reading from stdin..."):
+                body = sys.stdin.read()
+        else:
+            body = spawn_editor()
+
+        sender = args.from_address if args.from_address else DEFAULT_FROM
+
+        with console.status(f"[bold green]Creating draft from {sender}..."):
+            draft_id = client.create_draft(
+                recipients=args.recipients,
+                subject=args.subject if args.subject else "",
+                body=body,
+                cc=args.cc,
+                bcc=args.bcc,
+                attachments=args.attach,
+                from_address=sender,
+            )
+        console.print(
+            f"[bold green]Draft created successfully! ID: {draft_id}[/bold green]"
+        )
+
+    elif args.draft_action == "send":
+        with console.status("[bold green]Fetching draft details..."):
+            drafts = client.list_drafts(max_results=50)
+            target_draft = None
+            for d in drafts:
+                if d["id"] == args.id:
+                    target_draft = d
+                    break
+
+        if not target_draft:
+            console.print(f"[red]Draft with ID {args.id} not found.[/red]")
+            return
+
+        details = target_draft["details"]
+
+        if not args.yes:
+            preview_lines = [
+                f"[bold cyan]Draft ID:[/bold cyan]    {args.id}",
+            ]
+            if details:
+                preview_lines.extend(
+                    [
+                        f"[bold cyan]From:[/bold cyan]        {details.sender}",
+                        f"[bold cyan]Subject:[/bold cyan]     {details.subject}",
+                        "\n[bold underline]Body Content Preview:[/bold underline]",
+                        details.body if details.body else "[dim](Empty body)[/dim]",
+                    ]
+                )
+            else:
+                preview_lines.append("[dim]No details available for preview.[/dim]")
+
+            console.print(
+                Panel(
+                    "\n".join(preview_lines),
+                    title="[bold yellow]✉️ Draft Send Preview[/bold yellow]",
+                    border_style="yellow",
+                    expand=False,
+                )
+            )
+
+            if not Confirm.ask("Send this draft?"):
+                console.print("[yellow]Cancelled draft sending.[/yellow]")
+                return
+
+        with console.status(f"[bold green]Sending draft {args.id}..."):
+            sent_msg_id = client.send_draft(args.id)
+        console.print(
+            f"[bold green]Draft sent successfully! Message ID: {sent_msg_id}[/bold green]"
+        )
+
+
+def cmd_labels(args: argparse.Namespace) -> None:
+    client = get_client()
+    if args.label_action in ["list", "ls"]:
+        with console.status("[bold green]Fetching labels..."):
+            labels = client.list_labels()
+        if not labels:
+            console.print("[yellow]No labels found.[/yellow]")
+            return
+        table = Table(title="Gmail Labels")
+        table.add_column("Label ID", style="cyan", no_wrap=True)
+        table.add_column("Name", style="white")
+        table.add_column("Type", style="magenta")
+        for lbl in labels:
+            table.add_row(lbl["id"], lbl["name"], lbl["type"])
+        console.print(table)
+
+    elif args.label_action == "create":
+        with console.status(f"[bold green]Creating label '{args.name}'..."):
+            label_id = client.create_label(args.name)
+        console.print(
+            f"[bold green]Label '{args.name}' created successfully! ID: {label_id}[/bold green]"
+        )
+
+    elif args.label_action == "add":
+        with console.status(
+            f"[bold green]Adding label '{args.name}' to message {args.msg_id}..."
+        ):
+            client.add_label_to_email(args.msg_id, args.name)
+        console.print(
+            f"[bold green]Label '{args.name}' added successfully to message {args.msg_id}.[/bold green]"
+        )
+
+    elif args.label_action == "remove":
+        with console.status(
+            f"[bold green]Removing label '{args.name}' from message {args.msg_id}..."
+        ):
+            client.remove_label_from_email(args.msg_id, args.name)
+        console.print(
+            f"[bold green]Label '{args.name}' removed successfully from message {args.msg_id}.[/bold green]"
+        )
+
+
+def cmd_attachments(args: argparse.Namespace) -> None:
+    client = get_client()
+    if args.attach_action in ["download", "get"]:
+        with console.status(
+            f"[bold green]Downloading attachments from message {args.msg_id}..."
+        ):
+            saved_paths = client.download_attachments(
+                args.msg_id, output_dir=args.output_dir
+            )
+        if not saved_paths:
+            console.print("[yellow]No attachments found in this message.[/yellow]")
+        else:
+            console.print(
+                f"[bold green]Successfully downloaded {len(saved_paths)} attachments:[/bold green]"
+            )
+            for p in saved_paths:
+                console.print(f" - {p}")
+
+
+def cmd_thread(args: argparse.Namespace) -> None:
+    client = get_client()
+    if args.thread_action in ["show", "view"]:
+        with console.status(f"[bold green]Fetching thread {args.thread_id}..."):
+            emails = client.get_thread_details(args.thread_id)
+        if not emails:
+            console.print(
+                f"[yellow]No messages found in thread {args.thread_id}.[/yellow]"
+            )
+            return
+
+        console.print(
+            f"\n[bold magenta]Thread Conversation (ID: {args.thread_id})[/bold magenta]"
+        )
+        console.print(f"Total messages: {len(emails)}\n")
+
+        for idx, email in enumerate(emails, 1):
+            console.print(
+                Panel(
+                    f"[bold green]From:[/bold green]    {email.sender}\n"
+                    f"[bold green]Date:[/bold green]    {email.date}\n"
+                    f"[bold green]Subject:[/bold green] {email.subject}\n\n"
+                    f"{email.body}",
+                    title=f"Message #{idx} (ID: {email.id})",
+                    border_style="cyan" if idx % 2 == 0 else "blue",
+                    expand=False,
+                )
+            )
 
 
 def main() -> None:
@@ -514,9 +717,94 @@ def main() -> None:
     )
     parser_send.add_argument("--forward", dest="forward_id", help="Forward Message ID")
     parser_send.add_argument(
-        "--yes", "-y", action="store_true", help="Skip confirmation (not fully impl)"
+        "--yes", "-y", action="store_true", help="Skip confirmation"
     )
     parser_send.set_defaults(func=cmd_send)
+
+    # DRAFTS
+    parser_drafts = subparsers.add_parser("drafts", help="Manage email drafts")
+    draft_subparsers = parser_drafts.add_subparsers(
+        dest="draft_action", required=True, help="Draft action"
+    )
+
+    dp_list = draft_subparsers.add_parser(
+        "list", help="List current drafts", aliases=["ls"]
+    )
+    dp_list.add_argument(
+        "count", type=int, nargs="?", default=10, help="Number of drafts to list"
+    )
+
+    dp_create = draft_subparsers.add_parser(
+        "create", help="Create a new draft", aliases=["write"]
+    )
+    dp_create.add_argument(
+        "--to", dest="recipients", nargs="+", required=True, help="Recipient(s)"
+    )
+    dp_create.add_argument("--subject", "-s", help="Subject line")
+    dp_create.add_argument("--body", "-b", help="Body text")
+    dp_create.add_argument(
+        "--file", "-f", dest="input_file", help="File containing body text"
+    )
+    dp_create.add_argument("--from", "-F", dest="from_address", help="Sender address")
+    dp_create.add_argument("--attach", "-a", nargs="*", help="Attachments")
+    dp_create.add_argument("--cc", nargs="*", help="CC recipients")
+    dp_create.add_argument("--bcc", nargs="*", help="BCC recipients")
+
+    dp_send = draft_subparsers.add_parser("send", help="Send an existing draft")
+    dp_send.add_argument("id", help="Draft ID to send")
+    dp_send.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
+
+    parser_drafts.set_defaults(func=cmd_drafts)
+
+    # LABELS
+    parser_labels = subparsers.add_parser("labels", help="Manage labels")
+    label_subparsers = parser_labels.add_subparsers(
+        dest="label_action", required=True, help="Label action"
+    )
+
+    label_subparsers.add_parser("list", help="List all labels", aliases=["ls"])
+
+    lp_create = label_subparsers.add_parser("create", help="Create a new label")
+    lp_create.add_argument("name", help="Name of the label")
+
+    lp_add = label_subparsers.add_parser("add", help="Add a label to a message")
+    lp_add.add_argument("msg_id", help="Message ID")
+    lp_add.add_argument("name", help="Label name")
+
+    lp_remove = label_subparsers.add_parser(
+        "remove", help="Remove a label from a message"
+    )
+    lp_remove.add_argument("msg_id", help="Message ID")
+    lp_remove.add_argument("name", help="Label name")
+
+    parser_labels.set_defaults(func=cmd_labels)
+
+    # ATTACHMENTS
+    parser_attachments = subparsers.add_parser("attachments", help="Manage attachments")
+    attach_subparsers = parser_attachments.add_subparsers(
+        dest="attach_action", required=True, help="Attachment action"
+    )
+
+    ap_download = attach_subparsers.add_parser(
+        "download", help="Download attachments from an email", aliases=["get"]
+    )
+    ap_download.add_argument("msg_id", help="Message ID")
+    ap_download.add_argument("--output-dir", "-o", default=".", help="Output directory")
+
+    parser_attachments.set_defaults(func=cmd_attachments)
+
+    # THREAD
+    parser_thread = subparsers.add_parser("thread", help="View conversation threads")
+    thread_subparsers = parser_thread.add_subparsers(
+        dest="thread_action", required=True, help="Thread action"
+    )
+
+    tp_show = thread_subparsers.add_parser(
+        "show", help="Show all emails in a thread", aliases=["view"]
+    )
+    tp_show.add_argument("thread_id", help="Thread ID")
+
+    parser_thread.set_defaults(func=cmd_thread)
 
     args = parser.parse_args()
 
