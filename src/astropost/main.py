@@ -139,9 +139,9 @@ def cmd_summarize(args: argparse.Namespace) -> None:
         prompt_content += f"--- EMAIL ---\nFrom: {email.sender}\nSubject: {email.subject}\nDate: {email.date}\nBody:\n{email.body[:1500]}\n\n"
 
     try:
-        with console.status("[bold cyan]Querying Gemini 3.5 Flash..."):
+        with console.status("[bold cyan]Querying Gemini 3.8 Flash..."):
             response = ai_client.models.generate_content(
-                model="gemini-3.5-flash", contents=prompt_content
+                model="gemini-3.8-flash", contents=prompt_content
             )
 
             text = response.text or "No summary generated."
