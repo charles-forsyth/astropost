@@ -802,7 +802,7 @@ def main() -> None:
     tp_show = thread_subparsers.add_parser(
         "show", help="Show all emails in a thread", aliases=["view"]
     )
-    tp_show.add_argument("thread_id", help="Thread ID")
+    tp_show.add_argument("thread_id", help="Thread ID or any message ID in the thread")
 
     parser_thread.set_defaults(func=cmd_thread)
 

@@ -624,7 +624,21 @@ class GmailClient:
         wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type(HttpError),
     )
+    def _resolve_thread_id(self, some_id: str) -> str:
+        """Accept a thread ID or a message ID (what `list`/`search` print)."""
+        try:
+            msg = (
+                self.service.users()
+                .messages()
+                .get(userId="me", id=some_id, format="minimal")
+                .execute()
+            )
+            return str(msg.get("threadId", some_id))
+        except HttpError:
+            return some_id
+
     def get_thread_details(self, thread_id: str) -> List[Email]:
+        thread_id = self._resolve_thread_id(thread_id)
         try:
             thread = (
                 self.service.users()
