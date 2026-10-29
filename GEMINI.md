@@ -24,7 +24,7 @@ AstroPost uses a persistent configuration directory:
 - **Config Path:** `~/.config/astropost/`
 - **Credentials:** `~/.config/astropost/credentials.json` (OAuth Client ID/Secret)
 - **Token:** `~/.config/astropost/token.json` (Generated Oauth2 Session)
-- **Default Sender:** `Charles Forsyth <forsythc@ucr.edu>`
+- **Default Sender:** `Charles Forsyth <user@example.edu>`
 
 Authentication is handled via `google-auth-oauthlib`. On the first run, it initiates a local server flow to generate the `token.json`.
 

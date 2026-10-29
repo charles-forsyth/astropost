@@ -37,7 +37,7 @@ def test_drafts_create():
                 cc=None,
                 bcc=None,
                 attachments=None,
-                from_address="Charles Forsyth <forsythc@ucr.edu>",
+                from_address=None,
             )
 
 

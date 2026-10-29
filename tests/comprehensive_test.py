@@ -8,8 +8,8 @@ CONFIG_DIR = Path.home() / ".config" / "astropost"
 TOKEN_PATH = CONFIG_DIR / "token.json"
 CREDENTIALS_PATH = CONFIG_DIR / "credentials.json"
 
-TEST_EMAIL = "chuck.forsyth@gmail.com"  # Or forsythc@ucr.edu
-SENDER_ALIAS = "AstroPost Test Bot <forsythc@ucr.edu>"
+TEST_EMAIL = "user@example.com"  # Or user@example.edu
+SENDER_ALIAS = "AstroPost Test Bot <user@example.edu>"
 
 
 def run_tests():

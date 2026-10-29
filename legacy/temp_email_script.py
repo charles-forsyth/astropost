@@ -16,7 +16,7 @@ def main():
     )
     args = parser.parse_args()
 
-    my_email = "forsythc@ucr.edu"
+    my_email = "user@example.edu"
     files_to_process = glob.glob("/home/chuck/Documents/email_to_*.txt")
 
     if not files_to_process:

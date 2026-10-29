@@ -8,7 +8,7 @@ def send_email(subject, body, to_email):
     # Email server configuration
     smtp_server = "smtp.gmail.com"
     smtp_port = 587
-    smtp_user = "chuck.forsyth@gmail.com"  # Replace with your email
+    smtp_user = "user@example.com"  # Replace with your email
     smtp_password = "Tuckerdog27"  # Replace with your email password
 
     # Create the email

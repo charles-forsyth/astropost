@@ -17,7 +17,7 @@ def test_actions():
     subject = f"AstroPost Action Test {int(time.time())}"
     try:
         msg_id = client.send_email(
-            recipients=["forsythc@ucr.edu"],  # Sending to self
+            recipients=["user@example.edu"],  # Sending to self
             subject=subject,
             body="Testing archive and delete actions.",
         )

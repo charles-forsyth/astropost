@@ -23,6 +23,7 @@ import markdown
 from astropost.models import Email
 from email.message import EmailMessage
 from email import message_from_bytes
+from astropost.settings import with_always_cc
 
 console = Console()
 
@@ -266,10 +267,8 @@ class GmailClient:
         message["From"] = from_address if from_address else "me"
         message["Subject"] = subject or "(No Subject)"
 
-        # Always CC forsythc@ucr.edu on all outgoing emails and drafts
-        final_cc = list(cc) if cc else []
-        if "forsythc@ucr.edu" not in final_cc:
-            final_cc.append("forsythc@ucr.edu")
+        # Add any ASTROPOST_ALWAYS_CC addresses to every message and draft
+        final_cc = with_always_cc(cc)
 
         if final_cc:
             message["Cc"] = ", ".join(final_cc)
