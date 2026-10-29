@@ -1,5 +1,7 @@
 # AstroPost
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23755675.svg)](https://doi.org/10.5281/zenodo.23755675)
+
 **AstroPost** (`v0.1.22`) is a Python CLI for Gmail reading, searching, AI summarization, interactive inbox triage, Markdown-to-HTML email composition, draft/label management, thread viewing, and attachment handling.
 
 See [SPEC.md](SPEC.md) for the full system specification, architecture, OAuth scopes, and requirement traceability.
