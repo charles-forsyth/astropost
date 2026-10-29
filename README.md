@@ -14,6 +14,18 @@ See [SPEC.md](SPEC.md) for the full system specification, architecture, OAuth sc
 * **Markdown-to-HTML Sending & Drafts (`send`, `drafts`):** Write emails in Markdown (inline `--body`, `--body-file`, or `$EDITOR` via `--editor`) and send or save as Gmail drafts with automatic responsive HTML formatting and file attachments (`--attach`).
 * **Labels, Threads & Attachments (`labels`, `thread`, `attachments`):** Create/apply/remove Gmail labels, view full conversation threads, and inspect or download message attachments.
 
+
+## Sender and CC settings
+
+Put these in `~/.config/astropost/.env` (or the environment):
+
+```
+ASTROPOST_FROM="Your Name <you@example.org>"
+ASTROPOST_ALWAYS_CC=you@example.org
+```
+
+`ASTROPOST_FROM` sets the default From header (otherwise Gmail uses the signed-in account). `ASTROPOST_ALWAYS_CC` is a comma-separated list added to Cc on every message and draft. Both are optional.
+
 ## Installation
 
 ```bash

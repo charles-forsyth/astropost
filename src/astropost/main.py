@@ -15,6 +15,7 @@ from google import genai
 
 from astropost.client import GmailClient
 from astropost.models import Email
+from astropost.settings import default_from, with_always_cc
 
 console = Console()
 
@@ -24,7 +25,7 @@ TOKEN_PATH = CONFIG_DIR / "token.json"
 CREDENTIALS_PATH = CONFIG_DIR / "credentials.json"
 ENV_PATH = CONFIG_DIR / ".env"
 
-DEFAULT_FROM = "Charles Forsyth <forsythc@ucr.edu>"
+DEFAULT_FROM = default_from()  # None means Gmail uses the signed-in account
 
 
 def get_client() -> GmailClient:
@@ -400,12 +401,10 @@ def cmd_send(args: argparse.Namespace) -> None:
     sender = args.from_address if args.from_address else DEFAULT_FROM
 
     if not args.yes:
-        cc_list = list(args.cc) if args.cc else []
-        if "forsythc@ucr.edu" not in cc_list:
-            cc_list.append("forsythc@ucr.edu")
+        cc_list = with_always_cc(args.cc)
 
         preview_lines = [
-            f"[bold cyan]From:[/bold cyan]        {sender}",
+            f"[bold cyan]From:[/bold cyan]        {sender or 'your Gmail account'}",
             f"[bold cyan]To:[/bold cyan]          {', '.join(args.recipients)}",
         ]
         if args.subject:
